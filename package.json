@@ -1,0 +1,12 @@
+{
+  "name": "coldmail",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cold-email tool — root deploy scripts.",
+  "scripts": {
+    "install:all": "npm --prefix backend install && npm --prefix frontend install",
+    "build": "npm --prefix frontend install && npm --prefix frontend run build",
+    "start": "node backend/src/server.js",
+    "setup": "npm run install:all && npm run build"
+  }
+}

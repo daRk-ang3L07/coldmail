@@ -1,0 +1,610 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cold-Email App — Phase 1</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body { font-family: system-ui, sans-serif; max-width: 640px; margin: 48px auto; padding: 0 20px; line-height: 1.5; }
+      h1 { font-size: 1.5rem; }
+      .card { border: 1px solid #8884; border-radius: 12px; padding: 20px; margin: 16px 0; }
+      button { font: inherit; padding: 8px 16px; border-radius: 8px; border: 1px solid #8886; cursor: pointer; background: #2563eb; color: white; }
+      button.secondary { background: transparent; color: inherit; }
+      input { font: inherit; padding: 8px; width: 100%; box-sizing: border-box; margin: 4px 0 12px; border-radius: 8px; border: 1px solid #8886; background: transparent; color: inherit; }
+      .status { font-size: 0.9rem; opacity: 0.8; }
+      .ok { color: #16a34a; } .err { color: #dc2626; }
+      pre { background: #8881; padding: 12px; border-radius: 8px; overflow:auto; }
+      label { font-size: 0.85rem; opacity: 0.8; }
+    </style>
+  </head>
+  <body>
+    <h1>📧 Cold-Email App — Phase 1</h1>
+    <p class="status" id="status">Checking connection…</p>
+
+    <div class="card">
+      <h2 style="font-size:1.1rem">1. Connect Gmail</h2>
+      <p>Authorize the app to send mail through your Gmail account.</p>
+      <a href="/auth/google"><button>Connect Gmail</button></a>
+      <button class="secondary" id="logout">Disconnect (this session)</button>
+    </div>
+
+    <div class="card">
+      <h2 style="font-size:1.1rem">2. Send a test email</h2>
+      <label>To (leave blank to email yourself)</label>
+      <input id="to" placeholder="someone@example.com" />
+      <label>Subject</label>
+      <input id="subject" value="Test email from your cold-email app 🎉" />
+      <button id="send">Send test email</button>
+      <pre id="result" hidden></pre>
+    </div>
+
+    <div class="card">
+      <h2 style="font-size:1.1rem">3. Contacts <span id="count" class="status"></span></h2>
+      <p>Upload an Excel (.xlsx/.xls) or CSV file. It auto-detects columns like
+        <i>email, name, company, role</i>. Duplicates (same email) are skipped.</p>
+      <input type="file" id="file" accept=".xlsx,.xls,.csv" />
+      <button id="upload">Upload contacts</button>
+      <button class="secondary" id="clear">Clear all</button>
+      <pre id="uploadResult" hidden></pre>
+      <div id="contactsTable" style="margin-top:12px; overflow:auto"></div>
+    </div>
+
+    <div class="card">
+      <h2 style="font-size:1.1rem">4. Email template</h2>
+      <p>Use <code>{{firstName}}</code>, <code>{{company}}</code>, <code>{{role}}</code> etc.
+        Add a fallback with <code>{{firstName|there}}</code>. Square brackets like
+        <code>[Your Name]</code> are fill-once-yourself, not merged.</p>
+
+      <label>Saved templates</label>
+      <select id="tplSelect">
+        <option value="">— New template —</option>
+      </select>
+      <button class="secondary" id="tplStarter">Insert starter (HR cold email)</button>
+
+      <label>Template name</label>
+      <input id="tplName" placeholder="e.g. HR outreach v1" />
+      <label>Subject</label>
+      <input id="tplSubject" placeholder="{{firstName|Hello}} — interested in roles at {{company}}" />
+      <label>Body</label>
+      <textarea id="tplBody" rows="12" style="width:100%; box-sizing:border-box; font:inherit; padding:8px; border-radius:8px; border:1px solid #8886; background:transparent; color:inherit"></textarea>
+
+      <div style="margin-top:8px">
+        <button id="tplSave">Save / Update</button>
+        <button class="secondary" id="tplDelete">Delete</button>
+      </div>
+
+      <hr style="margin:20px 0; border:none; border-top:1px solid #8884" />
+
+      <h3 style="font-size:1rem">Preview &amp; test</h3>
+      <label>Preview as contact</label>
+      <select id="previewContact"><option value="">most recent contact</option></select>
+      <div style="margin:8px 0">
+        <button id="tplPreview">Preview merge</button>
+        <button id="tplSendTest">Send test to this contact</button>
+      </div>
+      <div id="previewBox" hidden style="border:1px solid #8884; border-radius:8px; padding:12px">
+        <div class="status">Subject:</div>
+        <div id="pvSubject" style="font-weight:600; margin-bottom:8px"></div>
+        <div class="status">Body:</div>
+        <div id="pvBody"></div>
+      </div>
+      <pre id="tplResult" hidden></pre>
+    </div>
+
+    <div class="card">
+      <h2 style="font-size:1.1rem">5. Campaigns (scheduled bulk send)</h2>
+      <p>Sends your template to all contacts, paced by your settings. Honors the
+        daily cap, time window, and interval. Runs in the background — you can
+        pause/resume anytime.</p>
+
+      <label>Campaign name</label>
+      <input id="cpName" placeholder="e.g. HR outreach — June" />
+      <label>Template</label>
+      <select id="cpTemplate"></select>
+
+      <div style="display:flex; gap:12px; flex-wrap:wrap">
+        <div style="flex:1; min-width:120px">
+          <label>Daily cap</label>
+          <input id="cpCap" type="number" value="50" min="1" max="2000" />
+        </div>
+        <div style="flex:1; min-width:120px">
+          <label>Interval (minutes)</label>
+          <input id="cpInterval" type="number" value="3" min="1" step="1" />
+        </div>
+      </div>
+      <div style="display:flex; gap:12px; flex-wrap:wrap">
+        <div style="flex:1; min-width:120px">
+          <label>Send window start</label>
+          <input id="cpStart" type="time" value="09:00" />
+        </div>
+        <div style="flex:1; min-width:120px">
+          <label>Send window end</label>
+          <input id="cpEnd" type="time" value="18:00" />
+        </div>
+      </div>
+      <label>Send on days</label>
+      <div id="cpDays" style="display:flex; gap:10px; flex-wrap:wrap; margin:4px 0 12px">
+        <label style="font-size:0.9rem"><input type="checkbox" value="1" checked /> Mon</label>
+        <label style="font-size:0.9rem"><input type="checkbox" value="2" checked /> Tue</label>
+        <label style="font-size:0.9rem"><input type="checkbox" value="3" checked /> Wed</label>
+        <label style="font-size:0.9rem"><input type="checkbox" value="4" checked /> Thu</label>
+        <label style="font-size:0.9rem"><input type="checkbox" value="5" checked /> Fri</label>
+        <label style="font-size:0.9rem"><input type="checkbox" value="6" /> Sat</label>
+        <label style="font-size:0.9rem"><input type="checkbox" value="0" /> Sun</label>
+      </div>
+
+      <label>Start at (optional — leave blank to begin as soon as started)</label>
+      <input id="cpStartAt" type="datetime-local" />
+
+      <hr style="margin:16px 0; border:none; border-top:1px solid #8884" />
+      <h3 style="font-size:1rem">Follow-ups (reminders)</h3>
+      <p class="status">Auto-sent in the same email thread, only to people who
+        haven't replied. Delay is counted from the previous message. Supports the
+        same <code>{{placeholders}}</code>.</p>
+      <div id="followupList"></div>
+      <button class="secondary" id="addFollowup">+ Add follow-up</button>
+
+      <p class="status" id="cpRecipients"></p>
+      <button class="secondary" id="cpPreview">Preview timeline</button>
+      <button id="cpCreate">Create campaign</button>
+      <pre id="cpResult" hidden></pre>
+
+      <div id="timelineBox" hidden style="border:1px solid #8884; border-radius:8px; padding:12px; margin-top:12px">
+        <div id="timelineSummary" class="status"></div>
+        <div id="timelineDays" style="display:flex; flex-wrap:wrap; gap:6px; margin:10px 0"></div>
+        <div id="timelineDetail"></div>
+      </div>
+
+      <div id="campaignList" style="margin-top:16px"></div>
+      <div id="campaignDetail" style="margin-top:12px"></div>
+    </div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+
+      async function refreshStatus() {
+        const r = await fetch('/auth/status').then((r) => r.json());
+        if (r.active) {
+          $('status').innerHTML = '✅ Connected as <b>' + r.active + '</b>';
+        } else if (r.accounts.length) {
+          $('status').innerHTML = 'Accounts available: ' + r.accounts.join(', ') + ' — click Connect to activate.';
+        } else {
+          $('status').textContent = 'Not connected yet.';
+        }
+      }
+
+      $('send').onclick = async () => {
+        $('result').hidden = false;
+        $('result').textContent = 'Sending…';
+        const res = await fetch('/email/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ to: $('to').value || undefined, subject: $('subject').value }),
+        });
+        const data = await res.json();
+        $('result').textContent = JSON.stringify(data, null, 2);
+        $('result').className = res.ok ? 'ok' : 'err';
+      };
+
+      $('logout').onclick = async () => {
+        await fetch('/auth/logout', { method: 'POST' });
+        refreshStatus();
+      };
+
+      // --- Contacts ---
+      function esc(s) {
+        return String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+      }
+
+      async function loadContacts() {
+        const r = await fetch('/contacts?limit=200').then((r) => r.json()).catch(() => null);
+        if (!r || r.error) {
+          $('count').textContent = '';
+          $('contactsTable').innerHTML = '';
+          return;
+        }
+        $('count').textContent = '(' + r.total + ')';
+        if (!r.contacts.length) {
+          $('contactsTable').innerHTML = '<p class="status">No contacts yet.</p>';
+          return;
+        }
+        const rows = r.contacts
+          .map(
+            (c) =>
+              `<tr><td>${esc(c.email)}</td><td>${esc(c.full_name)}</td><td>${esc(c.company)}</td><td>${esc(c.role)}</td>
+               <td><button class="secondary del" data-id="${c.id}" style="padding:2px 8px">✕</button></td></tr>`,
+          )
+          .join('');
+        $('contactsTable').innerHTML =
+          `<table style="width:100%; border-collapse:collapse; font-size:0.9rem">
+             <thead><tr style="text-align:left; opacity:0.7">
+               <th>Email</th><th>Name</th><th>Company</th><th>Role</th><th></th></tr></thead>
+             <tbody>${rows}</tbody></table>`;
+        document.querySelectorAll('.del').forEach((b) => {
+          b.onclick = async () => {
+            await fetch('/contacts/' + b.dataset.id, { method: 'DELETE' });
+            loadContacts();
+          };
+        });
+      }
+
+      $('upload').onclick = async () => {
+        const f = $('file').files[0];
+        if (!f) return alert('Choose a file first.');
+        const fd = new FormData();
+        fd.append('file', f);
+        $('uploadResult').hidden = false;
+        $('uploadResult').textContent = 'Uploading…';
+        const res = await fetch('/contacts/upload', { method: 'POST', body: fd });
+        const data = await res.json();
+        $('uploadResult').textContent = JSON.stringify(data, null, 2);
+        $('uploadResult').className = res.ok ? 'ok' : 'err';
+        loadContacts();
+      };
+
+      $('clear').onclick = async () => {
+        if (!confirm('Delete ALL contacts?')) return;
+        await fetch('/contacts', { method: 'DELETE' });
+        $('uploadResult').hidden = true;
+        loadContacts();
+      };
+
+      // --- Templates ---
+      let templates = [];
+
+      async function loadTemplates() {
+        const r = await fetch('/templates').then((r) => r.json()).catch(() => null);
+        if (!r || !r.templates) return;
+        templates = r.templates;
+        const sel = $('tplSelect');
+        sel.innerHTML = '<option value="">— New template —</option>' +
+          templates.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
+        if (typeof fillTemplateDropdown === 'function') fillTemplateDropdown();
+      }
+
+      async function loadContactPicker() {
+        const r = await fetch('/contacts?limit=500').then((r) => r.json()).catch(() => null);
+        const sel = $('previewContact');
+        if (!r || !r.contacts) return;
+        sel.innerHTML = '<option value="">most recent contact</option>' +
+          r.contacts.map((c) => `<option value="${c.id}">${esc(c.full_name || c.email)} — ${esc(c.email)}</option>`).join('');
+      }
+
+      $('tplSelect').onchange = () => {
+        const t = templates.find((x) => String(x.id) === $('tplSelect').value);
+        $('tplName').value = t ? t.name : '';
+        $('tplSubject').value = t ? t.subject : '';
+        $('tplBody').value = t ? t.body : '';
+      };
+
+      $('tplStarter').onclick = async () => {
+        const t = await fetch('/templates/starter').then((r) => r.json());
+        $('tplSelect').value = '';
+        $('tplName').value = t.name;
+        $('tplSubject').value = t.subject;
+        $('tplBody').value = t.body;
+      };
+
+      $('tplSave').onclick = async () => {
+        const payload = { name: $('tplName').value, subject: $('tplSubject').value, body: $('tplBody').value };
+        if (!payload.name || !payload.subject || !payload.body) return alert('Name, subject and body are required.');
+        const id = $('tplSelect').value;
+        const res = await fetch(id ? '/templates/' + id : '/templates', {
+          method: id ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        await loadTemplates();
+        if (res.ok && data.id) $('tplSelect').value = data.id;
+        showResult(res.ok ? 'Saved ✔' : data.error);
+      };
+
+      $('tplDelete').onclick = async () => {
+        const id = $('tplSelect').value;
+        if (!id) return alert('Select a saved template to delete.');
+        if (!confirm('Delete this template?')) return;
+        await fetch('/templates/' + id, { method: 'DELETE' });
+        $('tplSelect').value = '';
+        $('tplSelect').onchange();
+        loadTemplates();
+      };
+
+      async function doPreview() {
+        const res = await fetch('/templates/preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            subject: $('tplSubject').value,
+            body: $('tplBody').value,
+            contactId: $('previewContact').value || undefined,
+          }),
+        });
+        const data = await res.json();
+        $('previewBox').hidden = false;
+        $('pvSubject').textContent = data.subject;
+        $('pvBody').innerHTML = data.html;
+        if (data.note) showResult(data.note);
+        return data;
+      }
+      $('tplPreview').onclick = doPreview;
+
+      $('tplSendTest').onclick = async () => {
+        if (!confirm('Send a REAL email to the selected contact?')) return;
+        const res = await fetch('/templates/send-test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            subject: $('tplSubject').value,
+            body: $('tplBody').value,
+            contactId: $('previewContact').value || undefined,
+          }),
+        });
+        const data = await res.json();
+        showResult(res.ok ? 'Sent to ' + data.to + ' ✔' : data.error);
+      };
+
+      function showResult(msg) {
+        $('tplResult').hidden = false;
+        $('tplResult').textContent = typeof msg === 'string' ? msg : JSON.stringify(msg, null, 2);
+      }
+
+      // --- Campaigns ---
+      const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      function formatDays(csv) {
+        const ds = String(csv || '').split(',').map(Number).filter((n) => !isNaN(n)).sort();
+        if (ds.join(',') === '1,2,3,4,5') return 'Mon–Fri';
+        if (ds.join(',') === '0,1,2,3,4,5,6') return 'every day';
+        return ds.map((d) => DAY_NAMES[d]).join(', ');
+      }
+
+      // Follow-up step editor (dynamic rows)
+      function addFollowupRow(delayDays = 3, body = '') {
+        const div = document.createElement('div');
+        div.className = 'followup-row';
+        div.style = 'border:1px solid #8884; border-radius:8px; padding:10px; margin:8px 0';
+        div.innerHTML = `
+          <label>Send <input type="number" class="fuDelay" value="${delayDays}" min="0" style="width:70px"/> days after previous message (if no reply)</label>
+          <textarea class="fuBody" rows="5" placeholder="Hi {{firstName|there}}, just following up on my note below..." style="width:100%; box-sizing:border-box; font:inherit; padding:8px; border-radius:8px; border:1px solid #8886; background:transparent; color:inherit; margin-top:6px">${body}</textarea>
+          <button class="secondary fuRemove" type="button" style="padding:2px 10px; margin-top:6px">Remove</button>`;
+        div.querySelector('.fuRemove').onclick = () => div.remove();
+        $('followupList').appendChild(div);
+      }
+      function collectFollowups() {
+        return [...document.querySelectorAll('#followupList .followup-row')].map((row) => ({
+          delayDays: Number(row.querySelector('.fuDelay').value),
+          body: row.querySelector('.fuBody').value,
+        })).filter((f) => f.body.trim());
+      }
+      $('addFollowup').onclick = () => addFollowupRow();
+
+      function fillTemplateDropdown() {
+        $('cpTemplate').innerHTML = templates.length
+          ? templates.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join('')
+          : '<option value="">(save a template first)</option>';
+      }
+
+      function campaignFormPayload() {
+        const sendDays = [...document.querySelectorAll('#cpDays input:checked')].map((el) => Number(el.value));
+        return {
+          name: $('cpName').value,
+          templateId: Number($('cpTemplate').value),
+          dailyCap: Number($('cpCap').value),
+          intervalSeconds: Math.round(Number($('cpInterval').value) * 60),
+          windowStart: $('cpStart').value,
+          windowEnd: $('cpEnd').value,
+          sendDays,
+          startAt: $('cpStartAt').value || undefined,
+          followups: collectFollowups(),
+        };
+      }
+
+      // --- Preview timeline (dry run, sends nothing) ---
+      $('cpPreview').onclick = async () => {
+        const payload = campaignFormPayload();
+        if (!payload.sendDays.length) return alert('Pick at least one day to send on.');
+        $('timelineBox').hidden = false;
+        $('timelineSummary').textContent = 'Calculating…';
+        $('timelineDays').innerHTML = '';
+        $('timelineDetail').innerHTML = '';
+        const res = await fetch('/campaigns/preview-schedule', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const d = await res.json();
+        if (!res.ok) { $('timelineSummary').textContent = d.error; return; }
+        renderTimeline(d);
+      };
+
+      function renderTimeline(d) {
+        const noReply = d.assumedNoReplies ? ' · follow-ups shown assume nobody replies (max volume)' : '';
+        $('timelineSummary').innerHTML =
+          `<b>${d.totalSends}</b> emails (${d.totalRecipients} initial + ${d.totalFollowupSends} follow-up) over ` +
+          `<b>${d.sendingDays}</b> sending day${d.sendingDays > 1 ? 's' : ''}, ~${d.perDay}/day · ` +
+          `finishes <b>${d.finishDate}</b>${d.truncated ? ' (truncated — very long schedule)' : ''}${noReply}`;
+        $('timelineDays').innerHTML = d.days
+          .map(
+            (day, i) =>
+              `<button class="secondary tlDay" data-i="${i}" style="padding:4px 8px; font-size:0.8rem">
+                 ${day.weekday} ${day.date.slice(5)} <b>(${day.sends.length})</b>
+               </button>`,
+          )
+          .join('');
+        document.querySelectorAll('.tlDay').forEach((b) => {
+          b.onclick = () => showDay(d.days[Number(b.dataset.i)]);
+        });
+        if (d.days.length) showDay(d.days[0]);
+      }
+
+      function showDay(day) {
+        const rows = day.sends
+          .map(
+            (s) =>
+              `<tr><td>${esc(s.name || s.email)}</td><td class="status">${esc(s.email)}</td>
+               <td>${s.type === 'initial' ? '✉️ initial' : '🔁 follow-up #' + s.step}</td></tr>`,
+          )
+          .join('');
+        $('timelineDetail').innerHTML =
+          `<div style="margin-bottom:6px"><b>${day.weekday} ${day.date}</b> — ${day.sends.length} email${day.sends.length > 1 ? 's' : ''}</div>
+           <table style="width:100%; border-collapse:collapse; font-size:0.85rem"><tbody>${rows}</tbody></table>`;
+      }
+
+      $('cpCreate').onclick = async () => {
+        const payload = campaignFormPayload();
+        if (!payload.name) return alert('Give the campaign a name.');
+        if (!payload.templateId) return alert('Select a template (save one first).');
+        if (!payload.sendDays.length) return alert('Pick at least one day to send on.');
+        const res = await fetch('/campaigns', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        $('cpResult').hidden = false;
+        $('cpResult').textContent = res.ok
+          ? `Created "${data.name}" with ${data.progress.total} recipients (status: ${data.status}). Click Start to begin.`
+          : data.error;
+        loadCampaigns();
+      };
+
+      async function campaignAction(id, action) {
+        await fetch(`/campaigns/${id}/${action}`, { method: 'POST' });
+        loadCampaigns();
+      }
+      async function campaignDelete(id) {
+        if (!confirm('Delete this campaign? (does not unsend already-sent mail)')) return;
+        await fetch('/campaigns/' + id, { method: 'DELETE' });
+        loadCampaigns();
+      }
+
+      async function loadCampaigns() {
+        const r = await fetch('/campaigns').then((r) => r.json()).catch(() => null);
+        if (!r || !r.campaigns) return;
+        if (!r.campaigns.length) {
+          $('campaignList').innerHTML = '<p class="status">No campaigns yet.</p>';
+          return;
+        }
+        $('campaignList').innerHTML = r.campaigns
+          .map((c) => {
+            const p = c.progress;
+            const pct = p.total ? Math.round(((p.sent + p.failed + p.skipped) / p.total) * 100) : 0;
+            const controls =
+              (c.status === 'running'
+                ? `<button class="secondary" onclick="campaignAction(${c.id},'pause')">Pause</button>`
+                : c.status === 'completed'
+                ? ''
+                : `<button onclick="campaignAction(${c.id},'start')">Start</button>`) +
+              ` <button class="secondary" onclick="showCampaignDetail(${c.id})">Details</button>` +
+              ` <button class="secondary" onclick="campaignDelete(${c.id})">Delete</button>`;
+            return `<div style="border:1px solid #8884; border-radius:8px; padding:12px; margin:8px 0">
+              <div style="display:flex; justify-content:space-between; align-items:center">
+                <b>${esc(c.name)}</b><span class="status">${c.status}</span>
+              </div>
+              <div style="background:#8882; border-radius:6px; height:8px; margin:8px 0; overflow:hidden">
+                <div style="background:#2563eb; height:100%; width:${pct}%"></div>
+              </div>
+              <div class="status">
+                ${p.sent} sent · ${p.replied} replied · ${p.queued} queued · ${p.failed} failed · ${p.skipped} skipped (of ${p.total}) ·
+                cap ${c.daily_cap}/day · every ${Math.round(c.interval_seconds / 60)}m · ${c.window_start}–${c.window_end} · ${formatDays(c.send_days)}
+                ${(c.followups && c.followups.length) ? ` · ${c.followups.length} follow-up${c.followups.length > 1 ? 's' : ''} (${c.followups.map((f) => '+' + f.delay_days + 'd').join(', ')})` : ' · no follow-ups'}
+              </div>
+              <div style="margin-top:8px">${controls}</div>
+            </div>`;
+          })
+          .join('');
+        if (selectedCampaignId) renderCampaignDetail();
+      }
+      // expose for inline onclick
+      window.campaignAction = campaignAction;
+      window.campaignDelete = campaignDelete;
+
+      // --- Campaign detail panel (Phase 6 dashboard) ---
+      let selectedCampaignId = null;
+      let detailFilter = '';
+      const STATUS_BADGE = { queued: '⏳ queued', sent: '📤 sent', replied: '✅ replied', failed: '❌ failed', skipped: '⤬ skipped' };
+      function fmtTime(ms) { return ms ? new Date(ms).toLocaleString() : '—'; }
+
+      window.showCampaignDetail = (id) => {
+        selectedCampaignId = selectedCampaignId === id ? null : id; // toggle
+        detailFilter = '';
+        renderCampaignDetail();
+      };
+      window.setDetailFilter = (f) => { detailFilter = f; renderCampaignDetail(); };
+      window.retryFailed = async (id) => {
+        const r = await fetch('/campaigns/' + id + '/retry-failed', { method: 'POST' }).then((r) => r.json());
+        alert('Re-queued ' + r.requeued + ' failed email(s).');
+        renderCampaignDetail();
+        loadCampaigns();
+      };
+
+      async function renderCampaignDetail() {
+        const box = $('campaignDetail');
+        if (!selectedCampaignId) { box.innerHTML = ''; return; }
+        const id = selectedCampaignId;
+        const c = await fetch('/campaigns/' + id).then((r) => r.json()).catch(() => null);
+        if (!c || c.error) { box.innerHTML = ''; return; }
+        const rec = await fetch('/campaigns/' + id + '/recipients' + (detailFilter ? '?status=' + detailFilter : ''))
+          .then((r) => r.json()).catch(() => ({ recipients: [] }));
+        const p = c.progress;
+        const emailed = p.sent + p.replied;
+        const replyRate = emailed > 0 ? Math.round((p.replied / emailed) * 100) : 0;
+        const totalSteps = (c.followups || []).length;
+
+        const filterBtn = (label, val) =>
+          `<button class="secondary" onclick="setDetailFilter('${val}')"
+             style="padding:2px 8px; font-size:0.8rem; ${detailFilter === val ? 'background:#2563eb; color:#fff' : ''}">${label}</button>`;
+
+        const rows = rec.recipients.map((r) => {
+          const stage = totalSteps ? `${r.stage}/${totalSteps}` : '—';
+          return `<tr>
+            <td>${esc(r.name || r.email)}<div class="status">${esc(r.email)}</div></td>
+            <td>${STATUS_BADGE[r.status] || r.status}</td>
+            <td class="status">${fmtTime(r.sent_at)}</td>
+            <td>${stage}</td>
+            <td class="status" style="color:#dc2626">${esc(r.error || '')}</td>
+          </tr>`;
+        }).join('');
+
+        box.innerHTML = `
+          <div style="border:1px solid #2563eb55; border-radius:8px; padding:12px">
+            <div style="display:flex; justify-content:space-between; align-items:center">
+              <b>${esc(c.name)} — details</b>
+              <button class="secondary" onclick="showCampaignDetail(${id})" style="padding:2px 8px">Close ✕</button>
+            </div>
+            <div class="status" style="margin:8px 0">
+              ✅ <b>${p.replied}</b> replied · 📤 ${p.sent} sent · ⏳ ${p.queued} queued · ❌ ${p.failed} failed · ⤬ ${p.skipped} skipped<br>
+              Reply rate: <b>${replyRate}%</b> · Sent today: <b>${c.sentToday}</b>/${c.daily_cap} · Status: ${c.status}
+            </div>
+            <div style="display:flex; gap:6px; flex-wrap:wrap; margin:8px 0">
+              ${filterBtn('All', '')} ${filterBtn('Replied', 'replied')} ${filterBtn('Sent', 'sent')}
+              ${filterBtn('Queued', 'queued')} ${filterBtn('Failed', 'failed')} ${filterBtn('Skipped', 'skipped')}
+              ${p.failed > 0 ? `<button onclick="retryFailed(${id})" style="padding:2px 8px; font-size:0.8rem">Retry failed</button>` : ''}
+            </div>
+            <div style="max-height:320px; overflow:auto">
+              <table style="width:100%; border-collapse:collapse; font-size:0.85rem">
+                <thead><tr style="text-align:left; opacity:0.7; position:sticky; top:0; background:var(--bg,#222)">
+                  <th>Contact</th><th>Status</th><th>Sent</th><th>Stage</th><th>Error</th></tr></thead>
+                <tbody>${rows || '<tr><td colspan="5" class="status">No recipients in this filter.</td></tr>'}</tbody>
+              </table>
+            </div>
+          </div>`;
+      }
+
+      async function refreshContactCount() {
+        const r = await fetch('/contacts?limit=1').then((r) => r.json()).catch(() => null);
+        if (r && typeof r.total === 'number') {
+          $('cpRecipients').textContent = `Will send to all ${r.total} contacts.`;
+        }
+      }
+
+      refreshStatus();
+      loadContacts().then(() => { loadContactPicker(); refreshContactCount(); });
+      loadTemplates().then(fillTemplateDropdown);
+      loadCampaigns();
+      // Live-refresh campaign progress while the engine works.
+      setInterval(loadCampaigns, 5000);
+    </script>
+  </body>
+</html>
