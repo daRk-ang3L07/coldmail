@@ -20,13 +20,34 @@ function encodeHeader(value) {
   return `=?UTF-8?B?${Buffer.from(value, 'utf8').toString('base64')}?=`;
 }
 
+/** The text+html alternative block (between the given boundary markers). */
+function alternativePart(altBoundary, plain, html) {
+  return [
+    `--${altBoundary}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    'Content-Transfer-Encoding: 7bit',
+    '',
+    plain,
+    '',
+    `--${altBoundary}`,
+    'Content-Type: text/html; charset="UTF-8"',
+    'Content-Transfer-Encoding: 7bit',
+    '',
+    html,
+    '',
+    `--${altBoundary}--`,
+  ];
+}
+
 /**
- * Build a raw MIME email. Sends HTML with a plain-text fallback
- * (multipart/alternative) so it renders well everywhere.
+ * Build a raw MIME email. HTML + plain-text alternative; if attachments are
+ * given, the whole thing is wrapped in multipart/mixed.
+ * @param attachments Array<{ filename, mimeType, content: Buffer }>
  */
-function buildRawMessage({ from, to, subject, html, text, replyTo }) {
-  const boundary = 'gmass_boundary_' + Math.random().toString(36).slice(2);
+export function buildRawMessage({ from, to, subject, html, text, replyTo, attachments }) {
   const plain = text || html.replace(/<[^>]+>/g, '');
+  const altBoundary = 'alt_' + Math.random().toString(36).slice(2);
+  const hasAttachments = attachments && attachments.length;
 
   const headers = [
     `From: ${from}`,
@@ -34,26 +55,37 @@ function buildRawMessage({ from, to, subject, html, text, replyTo }) {
     replyTo ? `Reply-To: ${replyTo}` : null,
     `Subject: ${encodeHeader(subject)}`,
     'MIME-Version: 1.0',
-    `Content-Type: multipart/alternative; boundary="${boundary}"`,
   ].filter(Boolean);
 
-  const body = [
-    `--${boundary}`,
-    'Content-Type: text/plain; charset="UTF-8"',
-    'Content-Transfer-Encoding: 7bit',
-    '',
-    plain,
-    '',
-    `--${boundary}`,
-    'Content-Type: text/html; charset="UTF-8"',
-    'Content-Transfer-Encoding: 7bit',
-    '',
-    html,
-    '',
-    `--${boundary}--`,
-  ];
+  if (!hasAttachments) {
+    headers.push(`Content-Type: multipart/alternative; boundary="${altBoundary}"`);
+    return [...headers, '', ...alternativePart(altBoundary, plain, html)].join('\r\n');
+  }
 
-  return [...headers, '', ...body].join('\r\n');
+  const mixedBoundary = 'mix_' + Math.random().toString(36).slice(2);
+  headers.push(`Content-Type: multipart/mixed; boundary="${mixedBoundary}"`);
+
+  const parts = [
+    `--${mixedBoundary}`,
+    `Content-Type: multipart/alternative; boundary="${altBoundary}"`,
+    '',
+    ...alternativePart(altBoundary, plain, html),
+  ];
+  for (const att of attachments) {
+    const safeName = String(att.filename).replace(/"/g, '');
+    const b64 = att.content.toString('base64').replace(/(.{76})/g, '$1\r\n');
+    parts.push(
+      `--${mixedBoundary}`,
+      `Content-Type: ${att.mimeType || 'application/octet-stream'}; name="${safeName}"`,
+      `Content-Disposition: attachment; filename="${safeName}"`,
+      'Content-Transfer-Encoding: base64',
+      '',
+      b64,
+      '',
+    );
+  }
+  parts.push(`--${mixedBoundary}--`);
+  return [...headers, '', ...parts].join('\r\n');
 }
 
 /**
@@ -65,14 +97,15 @@ function buildRawMessage({ from, to, subject, html, text, replyTo }) {
  * @param {string} opts.html     - HTML body
  * @param {string} [opts.text]   - optional plain-text body (auto-derived if omitted)
  * @param {string} [opts.threadId] - attach to an existing Gmail thread (for follow-ups)
+ * @param {Array}  [opts.attachments] - [{ filename, mimeType, content: Buffer }]
  * @returns {Promise<{id: string, threadId: string}>}
  */
-export async function sendEmail({ account, to, subject, html, text, threadId }) {
+export async function sendEmail({ account, to, subject, html, text, threadId, attachments }) {
   const auth = await getAuthorizedClient(account);
   const gmail = google.gmail({ version: 'v1', auth });
 
   const raw = toBase64Url(
-    buildRawMessage({ from: account, to, subject, html, text }),
+    buildRawMessage({ from: account, to, subject, html, text, attachments }),
   );
 
   // Passing threadId + a matching "Re: …" subject makes Gmail thread the

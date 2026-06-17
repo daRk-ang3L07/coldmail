@@ -13,6 +13,7 @@ import {
   markFollowupSent,
   markReplied,
   hasPendingWork,
+  getAttachmentsWithContent,
 } from '../services/campaignsService.js';
 import { getTemplate } from '../services/templatesService.js';
 import { getContact } from '../services/contactsService.js';
@@ -169,6 +170,8 @@ async function processCampaign(c, now = new Date()) {
       return;
     }
     const merged = mergeTemplate(template, contact);
+    // Attachments (e.g. resume) ride along on the INITIAL email only.
+    const attachments = await getAttachmentsWithContent(c.id);
     try {
       const res = await senderFn({
         account: c.account,
@@ -176,6 +179,7 @@ async function processCampaign(c, now = new Date()) {
         subject: merged.subject,
         html: merged.html,
         text: merged.text,
+        attachments,
       });
       await markRecipientSent(recipient.id, {
         messageId: res.id,

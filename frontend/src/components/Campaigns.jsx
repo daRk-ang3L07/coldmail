@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { DAY_NAMES, DEFAULT_DAYS } from '../utils.js';
 import CampaignList from './CampaignList.jsx';
@@ -24,6 +24,7 @@ export default function Campaigns() {
   const [notice, setNotice] = useState(null);
   const [timeline, setTimeline] = useState(null);
   const [openDay, setOpenDay] = useState(0);
+  const attachRef = useRef();
 
   useEffect(() => {
     api.get('/templates').then((r) => setTemplates(r.templates));
@@ -84,7 +85,19 @@ export default function Campaigns() {
     if (!days.length) return setNotice({ ok: false, msg: 'Pick at least one day to send on.' });
     try {
       const c = await api.post('/campaigns', payload());
-      setNotice({ ok: true, msg: `Created "${c.name}" with ${c.progress.total} recipients. Click Start in the list below.` });
+      // Upload any selected attachments (e.g. resume) to the new campaign.
+      const files = attachRef.current?.files || [];
+      let attached = 0;
+      for (const f of files) {
+        try {
+          await api.upload('/campaigns/' + c.id + '/attachments', f);
+          attached++;
+        } catch (e) {
+          setNotice({ ok: false, msg: `Campaign created, but "${f.name}" failed: ${e.message}` });
+        }
+      }
+      if (attachRef.current) attachRef.current.value = '';
+      setNotice({ ok: true, msg: `Created "${c.name}" with ${c.progress.total} recipients${attached ? ` and ${attached} attachment(s)` : ''}. Click Start in the list below.` });
       setVersion((v) => v + 1);
     } catch (e) {
       setNotice({ ok: false, msg: e.message });
@@ -177,6 +190,11 @@ export default function Campaigns() {
           </div>
         ))}
         <button className="ghost" onClick={addFollowup}>+ Add follow-up</button>
+
+        <hr style={{ margin: '16px 0', border: 'none', borderTop: '1px solid var(--border)' }} />
+        <h2 style={{ fontSize: '1rem' }}>Attachments</h2>
+        <p className="hint">Attach a file (e.g. your resume) — it's included on the initial email to each contact. Max 2 MB each. For larger files, use a link in the template instead.</p>
+        <input type="file" ref={attachRef} multiple accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" />
 
         <p className="muted" style={{ marginTop: 14 }}>
           {selectedList ? `Will send to ${selectedList.count} contacts in “${selectedList.name}”.` : 'Select a list to send to.'}

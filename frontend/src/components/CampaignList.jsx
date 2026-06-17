@@ -32,6 +32,18 @@ export default function CampaignList({ version }) {
     await api.del('/campaigns/' + id);
     load();
   }
+  async function addAttachment(id, file) {
+    try {
+      await api.upload('/campaigns/' + id + '/attachments', file);
+    } catch (e) {
+      alert(e.message);
+    }
+    load();
+  }
+  async function removeAttachment(id, attId) {
+    await api.del(`/campaigns/${id}/attachments/${attId}`);
+    load();
+  }
 
   if (!campaigns.length) {
     return (
@@ -63,6 +75,26 @@ export default function CampaignList({ version }) {
               {c.followups?.length
                 ? ` · ${c.followups.length} follow-up${c.followups.length > 1 ? 's' : ''} (${c.followups.map((f) => '+' + f.delay_days + 'd').join(', ')})`
                 : ' · no follow-ups'}
+            </div>
+            <div className="muted" style={{ marginTop: 6 }}>
+              📎{' '}
+              {c.attachments?.length
+                ? c.attachments.map((a) => (
+                    <span key={a.id} className="pill" style={{ marginRight: 6 }}>
+                      {a.filename}{' '}
+                      <span onClick={() => removeAttachment(c.id, a.id)} style={{ cursor: 'pointer' }} title="Remove">✕</span>
+                    </span>
+                  ))
+                : 'no attachments'}
+              <label style={{ marginLeft: 8, cursor: 'pointer', color: 'var(--primary)' }}>
+                + add file
+                <input
+                  type="file"
+                  style={{ display: 'none' }}
+                  accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
+                  onChange={(e) => e.target.files[0] && addAttachment(c.id, e.target.files[0])}
+                />
+              </label>
             </div>
             <div className="btnrow">
               {c.status === 'running' ? (

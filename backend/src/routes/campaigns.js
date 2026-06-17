@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import multer from 'multer';
 import {
   createCampaign,
   listCampaigns,
@@ -8,6 +9,9 @@ import {
   replaceFollowups,
   listRecipients,
   retryFailed,
+  addAttachment,
+  deleteAttachment,
+  listAttachments,
 } from '../services/campaignsService.js';
 import { listContactRefs } from '../services/contactsService.js';
 import { getTemplate } from '../services/templatesService.js';
@@ -147,6 +151,43 @@ campaignsRouter.put('/:id/followups', async (req, res) => {
   const c = await getCampaign(req.account, Number(req.params.id));
   if (!c) return res.status(404).json({ error: 'Not found.' });
   await replaceFollowups(c.id, sanitizeFollowups(req.body?.followups));
+  res.json(await getCampaign(req.account, c.id));
+});
+
+// --- Attachments (e.g. resume), capped at 2 MB, max 5 per campaign ---
+const MAX_ATTACHMENTS = 5;
+const uploadAtt = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 * 1024 * 1024 } });
+
+campaignsRouter.post('/:id/attachments', (req, res) => {
+  uploadAtt.single('file')(req, res, async (err) => {
+    if (err) {
+      const msg = err.code === 'LIMIT_FILE_SIZE'
+        ? 'File too large (max 2 MB). For bigger files, use a link in the template instead.'
+        : err.message;
+      return res.status(400).json({ error: msg });
+    }
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded (field name must be "file").' });
+
+    const c = await getCampaign(req.account, Number(req.params.id));
+    if (!c) return res.status(404).json({ error: 'Not found.' });
+    if ((await listAttachments(c.id)).length >= MAX_ATTACHMENTS) {
+      return res.status(400).json({ error: `Max ${MAX_ATTACHMENTS} attachments per campaign.` });
+    }
+
+    await addAttachment(c.id, {
+      filename: req.file.originalname,
+      mimeType: req.file.mimetype || 'application/octet-stream',
+      size: req.file.size,
+      content: req.file.buffer,
+    });
+    res.json(await getCampaign(req.account, c.id));
+  });
+});
+
+campaignsRouter.delete('/:id/attachments/:attId', async (req, res) => {
+  const c = await getCampaign(req.account, Number(req.params.id));
+  if (!c) return res.status(404).json({ error: 'Not found.' });
+  await deleteAttachment(c.id, Number(req.params.attId));
   res.json(await getCampaign(req.account, c.id));
 });
 

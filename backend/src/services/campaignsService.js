@@ -51,12 +51,43 @@ export async function getFollowups(campaignId) {
 }
 
 async function decorate(c) {
-  const [progress, followups, sentToday] = await Promise.all([
+  const [progress, followups, sentToday, attachments] = await Promise.all([
     statusCounts(c.id),
     getFollowups(c.id),
     countSentSince(c.id, startOfTodayMs()),
+    listAttachments(c.id),
   ]);
-  return { ...c, progress, followups, sentToday };
+  return { ...c, progress, followups, sentToday, attachments };
+}
+
+// --- Attachments ---
+
+/** Attachment metadata only (no file content) — for display. */
+export async function listAttachments(campaignId) {
+  const rows = await db.all('SELECT id, filename, mime_type, size FROM attachments WHERE campaign_id = ? ORDER BY id', [campaignId]);
+  return rows.map((r) => ({ ...r, size: Number(r.size) }));
+}
+
+/** Full attachments with content (as Buffers) — for sending. */
+export async function getAttachmentsWithContent(campaignId) {
+  const rows = await db.all('SELECT filename, mime_type, content FROM attachments WHERE campaign_id = ?', [campaignId]);
+  return rows.map((r) => ({
+    filename: r.filename,
+    mimeType: r.mime_type,
+    content: Buffer.isBuffer(r.content) ? r.content : Buffer.from(r.content),
+  }));
+}
+
+export async function addAttachment(campaignId, { filename, mimeType, size, content }) {
+  const info = await db.run(
+    'INSERT INTO attachments (campaign_id, filename, mime_type, size, content) VALUES (?, ?, ?, ?, ?)',
+    [campaignId, filename, mimeType, size, content],
+  );
+  return { id: info.lastInsertRowid, filename, mime_type: mimeType, size };
+}
+
+export async function deleteAttachment(campaignId, attachmentId) {
+  return (await db.run('DELETE FROM attachments WHERE campaign_id = ? AND id = ?', [campaignId, attachmentId])).changes;
 }
 
 export async function getCampaign(account, id) {

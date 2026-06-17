@@ -142,6 +142,18 @@ export async function initDb() {
       FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_followups_campaign ON campaign_followups(campaign_id, step);
+
+    CREATE TABLE IF NOT EXISTS attachments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      campaign_id INTEGER NOT NULL,
+      filename TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      content BLOB NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_attachments_campaign ON attachments(campaign_id);
   `);
 
   // --- Column migrations (idempotent) ---
